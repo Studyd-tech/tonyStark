@@ -5,46 +5,73 @@ public struct CursorHold {
     private var lockedPoint: Point?
     private var steadyAnchor: Point?
     private var steadySince: Double?
-    private var resumeSince: Double?
+    private var leftPointing = false
+    private var nonPointingPose: Pose?
+    private var nonPointingSince: Double?
+    private var pointingSince: Double?
     private var lastUpdate: Double?
 
     public init() {}
 
     public mutating func reset() { self = CursorHold() }
 
-    /// A pose transition or missing frame breaks dwell, but preserves a held target.
-    public mutating func suspend() {
-        steadyAnchor = nil
-        steadySince = nil
-        resumeSince = nil
-        lastUpdate = nil
-    }
-
-    public mutating func update(_ point: Point, at time: Double) -> Point {
+    /// Every non-pointing camera sample must be reported, including missing hands.
+    /// Only a confirmed command pose followed by a fresh point can release a hold.
+    public mutating func observePose(_ pose: Pose?, at time: Double) {
         if let previous = lastUpdate, time - previous > 0.18 || time < previous {
-            suspend()
+            breakDwell()
         }
         lastUpdate = time
-        if let locked = lockedPoint {
-            // Opening a palm can briefly still look like pointing. Require both
-            // meaningful movement and continuous pointing before following again.
-            if point.distance(to: locked) > 24 {
-                if resumeSince == nil { resumeSince = time }
-                if let started = resumeSince, time - started >= 0.3 {
-                    lockedPoint = nil
-                    resumeSince = nil
-                    steadyAnchor = point
-                    steadySince = time
-                    return point
+        if pose == .point {
+            nonPointingPose = nil
+            nonPointingSince = nil
+            if pointingSince == nil { pointingSince = time }
+        } else {
+            steadyAnchor = nil
+            steadySince = nil
+            pointingSince = nil
+            if let pose, pose != .other {
+                if nonPointingPose != pose {
+                    nonPointingPose = pose
+                    nonPointingSince = time
+                }
+                if isLocked, let started = nonPointingSince, time - started >= 0.18 {
+                    leftPointing = true
                 }
             } else {
-                resumeSince = nil
+                nonPointingPose = nil
+                nonPointingSince = nil
+            }
+        }
+    }
+
+    private mutating func breakDwell() {
+        steadyAnchor = nil
+        steadySince = nil
+        nonPointingPose = nil
+        nonPointingSince = nil
+        pointingSince = nil
+    }
+
+    /// Called only for pointing poses, with the proposed cursor position.
+    public mutating func update(_ point: Point, at time: Double) -> Point {
+        observePose(.point, at: time)
+        if let locked = lockedPoint {
+            // Movement alone cannot release the lock: unfolding a palm moves the
+            // fingertip while it may still be classified as the original point.
+            if leftPointing, let started = pointingSince, time - started >= 0.4 {
+                lockedPoint = nil
+                leftPointing = false
+                steadyAnchor = point
+                steadySince = time
+                return point
             }
             return locked
         }
         if let anchor = steadyAnchor, point.distance(to: anchor) <= 12 {
             if let started = steadySince, time - started >= 2 {
                 lockedPoint = point
+                leftPointing = false
                 steadyAnchor = nil
                 steadySince = nil
             }

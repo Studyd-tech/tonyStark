@@ -319,7 +319,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else if !live {
             guideTitle.stringValue = "Step 4 of 4 · Ready to test on your Mac"
             guideDetail.stringValue = "Enable control, then hold a point to arm. Aim inside a normal window; pinch thumb + index + middle together and move your hand. Open the pinch to drop. Press Esc at any time to pause."
-            guideFeedback.stringValue = "Hold your aim steady for two seconds to keep the target in place. Open your palm to click; close it to minimize. Point away briefly to aim again."
+            guideFeedback.stringValue = "Hold your aim steady for two seconds to keep the target in place. Open your palm to click; close it to minimize. Return to a clear pointing pose for a moment to aim again."
             captureButton.title = "Enable live Mac control"
         } else {
             guideTitle.stringValue = "You’re ready · Live Mac control"
@@ -609,7 +609,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if activeRoute == nil { gestureLabel.stringValue = "DISARMED · \(sample?.pose.rawValue.uppercased() ?? "NO HAND") · \(live ? "LIVE" : "PREVIEW")" }
             return
         }
-        if sample?.pose != .point { cursorHold.suspend() }
+        cursorHold.observePose(sample?.pose, at: frame.time)
         let actions = machine.update(sample, at: frame.time)
         handle(actions, now: frame.time)
         if !machine.armed && sample?.pose == .point {
@@ -730,7 +730,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         lastPoint = target
         if !wasLocked || !cursorHold.isLocked { lastAim = point }
         if !wasLocked && cursorHold.isLocked {
-            statusLabel.stringValue = "Target held. Open your palm to click here. To aim again, point away for a moment."
+            statusLabel.stringValue = "Target held. Open your palm to click here. The cursor stays held until you return to a clear pointing pose."
         } else if wasLocked && !cursorHold.isLocked {
             statusLabel.stringValue = "Aiming again. Hold steady for two seconds to keep the target in place, then open your palm to click."
         }
@@ -753,7 +753,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 statusLabel.stringValue = "Disarmed. Hold a pointing gesture to arm again."
             case .cursor(let point): aim(point, at: now)
             case .scrollStarted:
-                cursorHold.reset()
                 control.clearSelection()
                 guard let target = lastPoint else {
                     statusLabel.stringValue = "Point inside the page or window you want to scroll first."
