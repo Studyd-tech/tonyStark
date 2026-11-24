@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var desktop = Desktop()
     private var machine = GestureMachine()
     private var filter = CursorFilter()
+    private var cursorHold = CursorHold()
     private var saved: [SavedCalibration] = []
     private var activeRoute: SavedCalibration?
     private var selector = RouteSelector()
@@ -318,7 +319,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else if !live {
             guideTitle.stringValue = "Step 4 of 4 · Ready to test on your Mac"
             guideDetail.stringValue = "Enable control, then hold a point to arm. Aim inside a normal window; pinch thumb + index + middle together and move your hand. Open the pinch to drop. Press Esc at any time to pause."
-            guideFeedback.stringValue = "Point → palm clicks. Close that palm to minimize the selected window."
+            guideFeedback.stringValue = "Hold your aim steady for two seconds to keep the target in place. Open your palm to click; close it to minimize. Point away briefly to aim again."
             captureButton.title = "Enable live Mac control"
         } else {
             guideTitle.stringValue = "You’re ready · Live Mac control"
@@ -589,7 +590,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                       observation.hand.pose == .point, let p = route.mapping.map(observation.hand.aim) else { return false }
                 return onlyDisplay || ((-0.03...1.03).contains(p.x) && (-0.03...1.03).contains(p.y))
             }
-            let selection = selector.update(matches: matches.map(\.id), at: frame.time, onlyDisplay: onlyDisplay)
+            let selection = selector.update(matches: matches.map(\.id), at: frame.time,
+                                            locked: cursorHold.isLocked, onlyDisplay: onlyDisplay)
             if selection != activeRoute?.id {
                 resetInteraction()
                 activeRoute = matches.first { $0.id == selection }
@@ -607,6 +609,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if activeRoute == nil { gestureLabel.stringValue = "DISARMED · \(sample?.pose.rawValue.uppercased() ?? "NO HAND") · \(live ? "LIVE" : "PREVIEW")" }
             return
         }
+        if sample?.pose != .point { cursorHold.suspend() }
         let actions = machine.update(sample, at: frame.time)
         handle(actions, now: frame.time)
         if !machine.armed && sample?.pose == .point {
@@ -615,6 +618,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let mode: String
         if machine.scrolling { mode = "SCROLLING" }
         else if machine.dragging { mode = "GRABBING" }
+        else if cursorHold.isLocked { mode = "TARGET HELD" }
         else { mode = machine.armed ? "ARMED" : "DISARMED" }
         gestureLabel.stringValue = "\(mode) · \(sample?.pose.rawValue.uppercased() ?? "NO HAND") · \(desktop.displayName(route.displayID)) · \(live ? "LIVE" : "PREVIEW")"
     }
@@ -708,6 +712,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func resetInteraction() {
         _ = machine.reset(); control.release(); filter.reset(); overlay.hide()
+        cursorHold.reset()
         control.clearSelection()
         lastPoint = nil; lastAim = nil; dragAnchor = nil; dragAim = nil; dragScreen = nil
         activeRoute = nil
@@ -717,10 +722,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let route = activeRoute, let mapped = route.mapping.map(point), let r = desktop.bounds(of: route.displayID) else { return }
         let bounded = Point(min(1, max(0, mapped.x)), min(1, max(0, mapped.y)))
         let filtered = filter.update(bounded, at: now)
-        let target = desktop.clamp(CGPoint(x: r.minX + filtered.x * (r.width - 1),
-                                          y: r.minY + filtered.y * (r.height - 1)))
-        lastPoint = target; lastAim = point
-        overlay.show(at: target, message: "\(desktop.displayName(route.displayID))\n\(live ? "LIVE" : "PREVIEW")", live: live)
+        let proposed = desktop.clamp(CGPoint(x: r.minX + filtered.x * (r.width - 1),
+                                            y: r.minY + filtered.y * (r.height - 1)))
+        let wasLocked = cursorHold.isLocked
+        let held = cursorHold.update(Point(Double(proposed.x), Double(proposed.y)), at: now)
+        let target = CGPoint(x: held.x, y: held.y)
+        lastPoint = target
+        if !wasLocked || !cursorHold.isLocked { lastAim = point }
+        if !wasLocked && cursorHold.isLocked {
+            statusLabel.stringValue = "Target held. Open your palm to click here. To aim again, point away for a moment."
+        } else if wasLocked && !cursorHold.isLocked {
+            statusLabel.stringValue = "Aiming again. Hold steady for two seconds to keep the target in place, then open your palm to click."
+        }
+        let mode = cursorHold.isLocked ? "TARGET HELD" : live ? "LIVE" : "PREVIEW"
+        overlay.show(at: target, message: "\(desktop.displayName(route.displayID))\n\(mode)", live: live)
         if live { control.moveCursor(target) }
     }
     private func handle(_ actions: [GestureAction], now: Double) {
@@ -730,6 +745,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 statusLabel.stringValue = "Armed for \(activeRoute.map { desktop.displayName($0.displayID) } ?? "display"). Point to aim, then open your palm to click."
             case .disarmed:
                 control.release(); filter.reset(); overlay.hide()
+                cursorHold.reset()
                 control.clearSelection()
                 lastPoint = nil; lastAim = nil; dragAnchor = nil; dragAim = nil; dragScreen = nil
                 activeRoute = nil; selector.reset()
@@ -737,6 +753,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 statusLabel.stringValue = "Disarmed. Hold a pointing gesture to arm again."
             case .cursor(let point): aim(point, at: now)
             case .scrollStarted:
+                cursorHold.reset()
                 control.clearSelection()
                 guard let target = lastPoint else {
                     statusLabel.stringValue = "Point inside the page or window you want to scroll first."
@@ -786,6 +803,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     statusLabel.stringValue = "Point at a window before pinching."; continue
                 }
                 dragAnchor = anchor; dragAim = lastAim; dragScreen = target; filter.reset()
+                cursorHold.reset()
                 if live, let error = control.grab(at: target) { statusLabel.stringValue = error }
                 else { statusLabel.stringValue = live ? "Window grabbed. Move your hand; open the pinch to drop." : "PREVIEW: grabbed target. Move your pinched hand to test the drag." }
             case .drag(let anchor):

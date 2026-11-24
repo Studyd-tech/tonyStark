@@ -40,6 +40,8 @@ The menu bar hand icon reopens the controller and provides Pause and Quit. **Esc
 | --- | --- |
 | Hold an index-finger point toward a calibrated display | Arm after 0.75 seconds of visible pointing. With multiple camera/display pairs, hold for an additional 0.3 seconds to select the pair. |
 | Point while armed | Move the target; in live mode, move the Mac pointer |
+| Keep the pointing target steady for two seconds | Hold the cursor at that spot while forming a command. **TARGET HELD** appears. Small fingertip movements and briefly misread pointing during an open-palm transition do not move the target. |
+| Point away from a held target for about 0.3 seconds | Resume aiming. Keep pointing continuously; changing poses interrupts the release. |
 | Hold up index and middle fingers, then move your hand vertically | Scroll at the last pointing position. Keep the other fingers folded. Move up to go down the page, and down to go back up. Lower the fingers to stop. |
 | Point → open palm | Click at the last pointing position and remember the window there. |
 | Close that palm into a fist | Minimize the window you selected if it is still focused. |
@@ -79,6 +81,7 @@ Automated tests cover activation, continuous dwell, Mission Control transitions,
 Hardware acceptance checks after granting permissions:
 
 - Preview: check pointing, fist, palm, and three-finger pinch in your actual lighting. Make sure an unintended hand pose does not activate a command.
+- Aim at a small Dock or toolbar item, hold steady for two seconds until **TARGET HELD** appears, then open your palm. The cursor and click should stay on the item. Point away for a moment to resume aiming. Repeat near the screen edge and across calibrated displays.
 - Calibrate both displays; point between them and verify the named target display. Overlapping regions must show ambiguity with no live movement.
 - Live: aim inside an ordinary window, pinch, move, and release. The window should stay still while forming/releasing the pinch. Try moving a window across the display boundary.
 - Aim at an item in a Finder window. Make a fist, briefly open your palm, then close it again. The item should receive one left-click. Hold the palm open after a fist to open Mission Control instead. Press Esc to close Mission Control or pause live control.
