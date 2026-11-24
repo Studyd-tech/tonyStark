@@ -3,3 +3,7 @@ dist
 public/wasm
 public/models/*.task
 .DS_Store
+macos/.build/
+macos/build/
+macos/vendor/mediapipe/*.dylib
+macos/vendor/mediapipe/*.task

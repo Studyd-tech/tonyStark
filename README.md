@@ -1,5 +1,9 @@
 # Merlin 1D
 
+## Tony Stark fork: native Mac gestures
+
+This fork adds an experimental macOS companion for pointing, Mission Control, and three-finger window grabs, with calibration for each camera/display pair. See [the Mac app setup and limitations](macos/README.md). The browser visualizer below remains a separate experience.
+
 A wireframe SpaceX Merlin 1D engine floating in space, driven entirely by your bare hands through a webcam. Grab it, rotate it, zoom and pan with two hands, flick it into a free spin, then catch it.
 
 It's a browser take on the core of SpaceX's 2013 [*The Future of Design*](https://www.youtube.com/watch?v=xNqs_S-zEBY) demo, built with TypeScript, [Three.js](https://threejs.org) and [MediaPipe Hand Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker).
