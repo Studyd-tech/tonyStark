@@ -46,7 +46,7 @@ struct Desktop {
 }
 
 final class DesktopControl {
-    struct BrowserTabTarget {
+    struct BrowserTabTarget: Equatable {
         enum Window {
             case chrome(CGWindowID)
             case accessibility(AXUIElement)
@@ -55,6 +55,15 @@ final class DesktopControl {
         let browser: NSRunningApplication
         let window: Window
         var name: String { browser.localizedName ?? "the browser" }
+
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            guard lhs.browser.processIdentifier == rhs.browser.processIdentifier else { return false }
+            switch (lhs.window, rhs.window) {
+            case (.chrome(let a), .chrome(let b)): return a == b
+            case (.accessibility(let a), .accessibility(let b)): return CFEqual(a, b)
+            default: return false
+            }
+        }
     }
 
     private static let chromeBundleID = "com.google.Chrome"
@@ -67,6 +76,7 @@ final class DesktopControl {
     private var selectedWindow: AXUIElement?
     private var windowOrigin: CGPoint = .zero
     private var grabOrigin: CGPoint = .zero
+    private var recentBrowserTarget: BrowserTabTarget?
     var isTrusted: Bool { AXIsProcessTrusted() }
 
     func requestPermission() {
@@ -121,22 +131,54 @@ final class DesktopControl {
         NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: "/System/Applications/Mission Control.app"),
                                           configuration: NSWorkspace.OpenConfiguration()) { _, _ in }
     }
+    func rememberFrontBrowser() {
+        guard isTrusted, let front = NSWorkspace.shared.frontmostApplication,
+              let id = front.bundleIdentifier, Self.browserBundleIDs.contains(id) else { return }
+        recentBrowserTarget = target(for: front)
+    }
+
+    private func target(for browser: NSRunningApplication) -> BrowserTabTarget? {
+        // Prefer the actual focused Accessibility window. An on-screen window list
+        // can contain Chrome's profile picker and omit windows on other Spaces.
+        if let window = focusedWindow(of: browser.processIdentifier) {
+            return BrowserTabTarget(browser: browser, window: .accessibility(window))
+        }
+        if browser.bundleIdentifier == Self.chromeBundleID,
+           let window = visibleChromeWindows(for: browser).first {
+            return BrowserTabTarget(browser: browser, window: .chrome(window))
+        }
+        return nil
+    }
+
     func browserTabTarget() -> BrowserTabTarget? {
         guard isTrusted, let front = NSWorkspace.shared.frontmostApplication else { return nil }
-        if front.bundleIdentifier == Self.chromeBundleID, let window = visibleChromeWindows(for: front).first {
-            return BrowserTabTarget(browser: front, window: .chrome(window))
+        if let id = front.bundleIdentifier, Self.browserBundleIDs.contains(id) {
+            let target = target(for: front)
+            recentBrowserTarget = target
+            return target
         }
         if front.processIdentifier == NSRunningApplication.current.processIdentifier {
+            if let recent = recentBrowserTarget, !recent.browser.isTerminated,
+               !recent.browser.isHidden, targetWindowExists(recent) { return recent }
             let chromeApps = NSRunningApplication.runningApplications(withBundleIdentifier: Self.chromeBundleID)
                 .filter { !$0.isHidden && !$0.isTerminated }
             guard let chrome = chromeApps.first, chromeApps.count == 1 else { return nil }
             let windows = visibleChromeWindows(for: chrome)
             guard let window = windows.first, windows.count == 1 else { return nil }
-            return BrowserTabTarget(browser: chrome, window: .chrome(window))
+            return target(for: chrome) ?? BrowserTabTarget(browser: chrome, window: .chrome(window))
         }
-        guard let id = front.bundleIdentifier, Self.browserBundleIDs.contains(id),
-              let window = focusedWindow(of: front.processIdentifier) else { return nil }
-        return BrowserTabTarget(browser: front, window: .accessibility(window))
+        return nil
+    }
+
+    private func targetWindowExists(_ target: BrowserTabTarget) -> Bool {
+        switch target.window {
+        case .chrome(let id): return visibleChromeWindows(for: target.browser).contains(id)
+        case .accessibility(let window):
+            let app = AXUIElementCreateApplication(target.browser.processIdentifier)
+            let windows = attribute(app, kAXWindowsAttribute as CFString) as? [AXUIElement] ?? []
+            return windows.contains { CFEqual($0, window) } &&
+                (attribute(window, kAXMinimizedAttribute as CFString) as? Bool) != true
+        }
     }
 
     private func visibleChromeWindows(for chrome: NSRunningApplication) -> [CGWindowID] {
@@ -152,15 +194,14 @@ final class DesktopControl {
     }
 
     @MainActor
-    func closeBrowserTab(_ target: BrowserTabTarget) async -> String? {
-        guard isTrusted else { return "Accessibility access is required to close a tab." }
+    func closeBrowser(_ target: BrowserTabTarget, action: BrowserCloseAction) async -> String? {
+        guard isTrusted else { return "Accessibility access is required to close a browser tab or window." }
         let pid = target.browser.processIdentifier
         let currentPID = NSRunningApplication.current.processIdentifier
-        if NSWorkspace.shared.frontmostApplication?.processIdentifier == currentPID,
-           case .chrome(let windowID) = target.window {
-            guard visibleChromeWindows(for: target.browser) == [windowID],
+        if NSWorkspace.shared.frontmostApplication?.processIdentifier == currentPID {
+            guard targetWindowExists(target),
                   target.browser.activate(from: .current, options: []) else {
-                return "Click the Chrome tab you want to close, then repeat the gesture."
+                return "Select the browser window you want to close, then repeat the gesture."
             }
             let deadline = ProcessInfo.processInfo.systemUptime + 0.6
             while NSWorkspace.shared.frontmostApplication?.processIdentifier == currentPID,
@@ -189,10 +230,13 @@ final class DesktopControl {
               let up = CGEvent(keyboardEventSource: nil, virtualKey: key, keyDown: false) else {
             return "Couldn’t send the close-tab command."
         }
-        down.flags = .maskCommand
-        up.flags = .maskCommand
-        down.postToPid(pid)
-        up.postToPid(pid)
+        let flags: CGEventFlags = action == .window ? [.maskCommand, .maskShift] : .maskCommand
+        down.flags = flags
+        up.flags = flags
+        // Browser shortcuts go through the normal keyboard event stream, after
+        // verifying the intended browser and exact window are still in front.
+        down.post(tap: .cghidEventTap)
+        up.post(tap: .cghidEventTap)
         return nil
     }
     private func focusedWindow(of pid: pid_t) -> AXUIElement? {

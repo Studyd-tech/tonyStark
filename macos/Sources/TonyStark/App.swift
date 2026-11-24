@@ -42,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var twoHandGesture = TwoHandGesture()
     private var browserTabTarget: DesktopControl.BrowserTabTarget?
     private var tabCloseTask: Task<Void, Never>?
+    private var browserCloseSequence = BrowserCloseSequence<DesktopControl.BrowserTabTarget>()
     private var twoHandCameraID: String?
     private var captureNote = ""
     private var cameraProblem = ""
@@ -182,7 +183,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stack.addArrangedSubview(text("Three-finger pinch: thumb + index + middle. Pinch sensitivity (higher is easier):"))
         sensitivity.widthAnchor.constraint(equalToConstant: 340).isActive = true
         stack.addArrangedSubview(sensitivity)
-        let instructions = text("Point toward a calibrated screen to arm the pointer.\nClick: Aim at a window, then open your palm. Close that palm into a fist to minimize the selected window.\nScroll: Aim inside a page. Hold up your index and middle fingers, then move your hand up or down.\nClose tab: Select a tab in Chrome, show both open palms until CLOSE BOTH HANDS appears, then make two fists. If Tony Stark is in front, it can bring a single visible Chrome window forward.\nMission Control: Make two fists, then open both hands. With one hand, make a fist and hold your palm open for about a second.\nDrag: Aim at a window, pinch thumb + index + middle, then move your hand. Release to drop.\nEsc or Pause stops live control. Losing the hand disarms. A second camera can be assigned to the monitor.")
+        let instructions = text("Point toward a calibrated screen to arm the pointer.\nClick: Aim at a window, then open your palm. Close that palm into a fist to minimize the selected window.\nScroll: Aim inside a page. Hold up your index and middle fingers, then move your hand up or down.\nClose tab: Select your browser window, show both open palms until CLOSE BOTH HANDS appears, then make two fists. Repeat palms → fists within three seconds to close that same window. The controller remembers the browser window you last selected.\nMission Control: Make two fists, then open both hands. With one hand, make a fist and hold your palm open for about a second.\nDrag: Aim at a window, pinch thumb + index + middle, then move your hand. Release to drop.\nEsc or Pause stops live control. Losing the hand disarms. A second camera can be assigned to the monitor.")
         stack.addArrangedSubview(instructions)
         statusLabel.textColor = .secondaryLabelColor
         stack.addArrangedSubview(statusLabel)
@@ -323,7 +324,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             captureButton.title = "Enable live Mac control"
         } else {
             guideTitle.stringValue = "You’re ready · Live Mac control"
-            guideDetail.stringValue = "Point → palm clicks. Close that palm to minimize. Raise two fingers and move your hand vertically to scroll. Two palms → two fists closes the active browser tab. Two fists → two palms opens Mission Control. Pinch three fingers to drag. Esc pauses control."
+            guideDetail.stringValue = "Point → palm clicks. Close that palm to minimize. Raise two fingers and move your hand vertically to scroll. Two palms → two fists closes the active browser tab; repeat within three seconds to close the same window. Two fists → two palms opens Mission Control. Pinch three fingers to drag. Esc pauses control."
             guideFeedback.stringValue = poseFeedback
             captureButton.title = "Pause control"
         }
@@ -536,6 +537,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func tick() {
         let trusted = control.isTrusted
         permissionLabel.stringValue = trusted ? "Accessibility: allowed for this app" : "Window control blocked: macOS has not authorized this running copy."
+        control.rememberFrontBrowser()
         permissionLabel.textColor = trusted ? .systemGreen : .systemOrange
         if liveEnabled && !trusted { pause(); statusLabel.stringValue = "Accessibility access was removed. Control paused." }
         let now = ProcessInfo.processInfo.systemUptime
@@ -629,6 +631,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         tabCloseTask?.cancel()
         tabCloseTask = nil
         twoHandCameraID = nil
+        browserCloseSequence.reset()
     }
 
     private func twoHandsTakePriority(_ poses: [Pose?], cameraID: String, at now: Double) -> Bool {
@@ -646,7 +649,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if readyToClose && !wasReadyToClose {
             browserTabTarget = live ? control.browserTabTarget() : nil
             if let target = browserTabTarget {
-                setCloseTabStatus("\(target.name) found. Close both hands into fists.")
+                let closingWindow = browserCloseSequence.action(for: target, at: now) == .window
+                setCloseTabStatus("\(target.name) selected. Close both hands to close \(closingWindow ? "this window and its tabs" : "the active tab").")
             } else {
                 setCloseTabStatus(live
                     ? "Click the Chrome tab you want to close, then close both hands."
@@ -692,6 +696,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         guard tabCloseTask == nil else { return }
         guard let target = browserTabTarget ?? control.browserTabTarget() else {
+            browserCloseSequence.reset()
             setCloseTabStatus("Gesture recognized. Click the Chrome tab you want to close and try again.")
             return
         }
@@ -699,9 +704,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self, !Task.isCancelled else { return }
             defer { if !Task.isCancelled { tabCloseTask = nil } }
             guard live else { return }
-            let failure = await control.closeBrowserTab(target)
+            let action = browserCloseSequence.action(for: target, at: ProcessInfo.processInfo.systemUptime)
+            let failure = await control.closeBrowser(target, action: action)
             guard !Task.isCancelled else { return }
-            setCloseTabStatus(failure ?? "Sent ⌘W to \(target.name).")
+            if let failure {
+                browserCloseSequence.reset()
+                setCloseTabStatus(failure)
+            } else {
+                browserCloseSequence.recordSuccess(action, target: target, at: ProcessInfo.processInfo.systemUptime)
+                setCloseTabStatus(action == .window
+                    ? "Sent close-window command to \(target.name)."
+                    : "Sent close-tab command to \(target.name). Repeat palms → fists within 3 seconds to close this window.")
+            }
         }
     }
 

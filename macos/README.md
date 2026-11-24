@@ -46,7 +46,8 @@ The menu bar hand icon reopens the controller and provides Pause and Quit. **Esc
 | Point → open palm | Click at the last pointing position and remember the window there. |
 | Close that palm into a fist | Minimize the window you selected if it is still focused. |
 | Aim, then fist → palm → fist | Single left-click at the last pointing position. Hold the fist and palm briefly, then close again within about half a second. Preview shows the click at the target. |
-| Two open palms → two fists | Close the active tab in the frontmost supported browser (including Safari, Chrome, Firefox, Edge, and Brave). Show both open palms until **CLOSE BOTH HANDS** appears, then make two fists. If Tony Stark is in front and Chrome has one visible window, it brings Chrome forward and sends Command-W. |
+| Two open palms → two fists | Close the active tab in the selected browser window (including Safari, Chrome, Firefox, Edge, and Brave). Show both open palms until **CLOSE BOTH HANDS** appears, then make two fists. The controller remembers the browser window you last selected and can bring it forward if Tony Stark is in front. |
+| Repeat two palms → two fists within three seconds | Close that same browser window, including its remaining tabs. Changing browser windows, pausing control, or a failed close command clears the repeat. A later gesture closes another tab normally. |
 | Two fists → two open palms | Open Mission Control without arming the pointer. Keep both hands visible in the same camera. The status reads **OPEN BOTH PALMS** once the fists register. With two hands visible, pointing, clicking and dragging pause. |
 | Make a fist, then hold an open palm | Open Mission Control after about a second with the palm open, allowing time to complete a click first. |
 | Bring thumb, index and middle fingertips together | After 0.18 seconds, grab the window at the last pointing target |
