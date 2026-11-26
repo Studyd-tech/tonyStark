@@ -40,6 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var partialHand = false
     private var previewHandCount = 0
     private var twoHandGesture = TwoHandGesture()
+    private var doubleClap = DoubleClapGesture()
     private var browserTabTarget: DesktopControl.BrowserTabTarget?
     private var tabCloseTask: Task<Void, Never>?
     private var browserCloseSequence = BrowserCloseSequence<DesktopControl.BrowserTabTarget>()
@@ -183,7 +184,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stack.addArrangedSubview(text("Three-finger pinch: thumb + index + middle. Pinch sensitivity (higher is easier):"))
         sensitivity.widthAnchor.constraint(equalToConstant: 340).isActive = true
         stack.addArrangedSubview(sensitivity)
-        let instructions = text("Point toward a calibrated screen to arm the pointer.\nClick: Aim at a window, then open your palm. Close that palm into a fist to minimize the selected window.\nScroll: Aim inside a page. Hold up your index and middle fingers, then move your hand up or down.\nClose tab: Select your browser window, show both open palms until CLOSE BOTH HANDS appears, then make two fists. Repeat palms → fists within three seconds to close that same window. The controller remembers the browser window you last selected.\nMission Control: Make two fists, then open both hands. With one hand, make a fist and hold your palm open for about a second.\nDrag: Aim at a window, pinch thumb + index + middle, then move your hand. Release to drop.\nEsc or Pause stops live control. Losing the hand disarms. A second camera can be assigned to the monitor.")
+        let instructions = text("Point toward a calibrated screen to arm the pointer.\nClick: Aim at a window, then open your palm. Close that palm into a fist to minimize the selected window.\nScroll: Aim inside a page. Hold up your index and middle fingers, then move your hand up or down.\nClose tab: Select your browser window, show both open palms until CLOSE BOTH HANDS appears, then make two fists. Repeat palms → fists within three seconds to close that same window. The controller remembers the browser window you last selected.\nMission Control: Clap twice quickly with both hands visible to the camera. Separate your hands between claps; after the first, the status says CLAP ONCE MORE. You can also make two fists, then open both hands, or make one fist and hold your palm open for about a second.\nDrag: Aim at a window, pinch thumb + index + middle, then move your hand. Release to drop.\nEsc or Pause stops live control. Losing the hand disarms. A second camera can be assigned to the monitor.")
         stack.addArrangedSubview(instructions)
         statusLabel.textColor = .secondaryLabelColor
         stack.addArrangedSubview(statusLabel)
@@ -260,7 +261,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         liveToggle.toolTip = trusted ? "Enable gestures after checking the pointing preview." : "macOS has not granted this running copy Accessibility access. Use the permission recovery instructions in the setup card."
         let poseFeedback: String
         if previewHandCount == 2 && now - poseSeenAt < 0.3 {
-            poseFeedback = calibrating ? "Use one hand to capture this target." : "Two hands detected. Open both palms, then make two fists to close a browser tab."
+            poseFeedback = calibrating ? "Use one hand to capture this target." : "Two hands detected. Clap twice for Mission Control, or open both palms then make two fists to close a browser tab."
         } else {
             switch seen {
             case .point: poseFeedback = "✓ Point detected. Keep your whole hand inside the camera preview."
@@ -324,7 +325,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             captureButton.title = "Enable live Mac control"
         } else {
             guideTitle.stringValue = "You’re ready · Live Mac control"
-            guideDetail.stringValue = "Point → palm clicks. Close that palm to minimize. Raise two fingers and move your hand vertically to scroll. Two palms → two fists closes the active browser tab; repeat within three seconds to close the same window. Two fists → two palms opens Mission Control. Pinch three fingers to drag. Esc pauses control."
+            guideDetail.stringValue = "Point → palm clicks. Close that palm to minimize. Raise two fingers and move your hand vertically to scroll. Two palms → two fists closes the active browser tab; repeat within three seconds to close the same window. Clap twice quickly, separating your hands between claps, to open Mission Control. Two fists → two palms also works. Pinch three fingers to drag. Esc pauses control."
             guideFeedback.stringValue = poseFeedback
             captureButton.title = "Pause control"
         }
@@ -578,7 +579,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             return
         }
-        if twoHandsTakePriority(samples.map { $0?.pose }, cameraID: cameraID, at: frame.time) {
+        let aspectRatio = frame.image.map { Double($0.width) / Double($0.height) } ?? (4.0 / 3.0)
+        let clapHands = frame.hands.enumerated().compactMap { index, hand in
+            ClapHand(image: hand.image, pose: samples[index]?.pose, aspectRatio: aspectRatio)
+        }
+        if twoHandsTakePriority(samples.map { $0?.pose }, clapHands: clapHands, cameraID: cameraID, at: frame.time) {
             observations.removeValue(forKey: cameraID)
             return
         }
@@ -627,6 +632,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func resetTwoHandGestures() {
         twoHandGesture = TwoHandGesture()
+        doubleClap.reset()
         browserTabTarget = nil
         tabCloseTask?.cancel()
         tabCloseTask = nil
@@ -634,14 +640,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         browserCloseSequence.reset()
     }
 
-    private func twoHandsTakePriority(_ poses: [Pose?], cameraID: String, at now: Double) -> Bool {
-        let trackingPair = twoHandGesture.suppressesSingleHand(at: now)
+    private func twoHandsTakePriority(_ poses: [Pose?], clapHands: [ClapHand], cameraID: String, at now: Double) -> Bool {
+        let trackingPair = twoHandGesture.suppressesSingleHand(at: now) || doubleClap.suppressesOtherGestures(at: now)
         // Once a pair is seen, keep its camera even as the one-hand route resets.
         let commandCamera = trackingPair ? twoHandCameraID : activeRoute?.cameraID ?? selectedCameraID
         guard cameraID == commandCamera else { return trackingPair || poses.count == 2 }
         if twoHandCameraID != cameraID {
             resetTwoHandGestures()
             twoHandCameraID = cameraID
+        }
+        let clappedTwice = doubleClap.update(clapHands, at: now)
+        if clappedTwice || doubleClap.suppressesOtherGestures(at: now) {
+            // Clapping can briefly look like palms or fists as hands overlap.
+            // It takes priority over browser-close and the other two-hand command.
+            twoHandGesture = TwoHandGesture()
+            browserTabTarget = nil
+            tabCloseTask?.cancel(); tabCloseTask = nil
+            browserCloseSequence.reset()
+            if !trackingPair {
+                resetInteraction(); selector.reset(); observations.removeAll()
+            }
+            if clappedTwice {
+                closeTabStatus.isHidden = true
+                handle([.missionControl], now: now)
+            }
+            let hint = clappedTwice || !doubleClap.inProgress ? "DOUBLE CLAP · MISSION CONTROL"
+                : doubleClap.waitingForSecondClap ? "CLAP ONCE MORE" : "CLAPPING"
+            gestureLabel.stringValue = "\(hint) · \(live ? "LIVE" : "PREVIEW")"
+            return true
         }
         let wasReadyToClose = twoHandGesture.readyCommand == .closeTab
         let action = twoHandGesture.update(poses, at: now)

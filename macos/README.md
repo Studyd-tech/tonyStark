@@ -48,6 +48,7 @@ The menu bar hand icon reopens the controller and provides Pause and Quit. **Esc
 | Aim, then fist → palm → fist | Single left-click at the last pointing position. Hold the fist and palm briefly, then close again within about half a second. Preview shows the click at the target. |
 | Two open palms → two fists | Close the active tab in the selected browser window (including Safari, Chrome, Firefox, Edge, and Brave). Show both open palms until **CLOSE BOTH HANDS** appears, then make two fists. The controller remembers the browser window you last selected and can bring it forward if Tony Stark is in front. |
 | Repeat two palms → two fists within three seconds | Close that same browser window, including its remaining tabs. Changing browser windows, pausing control, or a failed close command clears the repeat. A later gesture closes another tab normally. |
+| Clap twice quickly in the camera view | Open Mission Control. Start with both hands apart and bring them together twice, separating between claps. Complete the second clap within about 1.2 seconds of the first. **CLAP ONCE MORE** confirms the first clap. This uses visible hand motion, requires live control for the real action, and does not use the microphone. |
 | Two fists → two open palms | Open Mission Control without arming the pointer. Keep both hands visible in the same camera. The status reads **OPEN BOTH PALMS** once the fists register. With two hands visible, pointing, clicking and dragging pause. |
 | Make a fist, then hold an open palm | Open Mission Control after about a second with the palm open, allowing time to complete a click first. |
 | Bring thumb, index and middle fingertips together | After 0.18 seconds, grab the window at the last pointing target |
@@ -82,6 +83,7 @@ Automated tests cover activation, continuous dwell, Mission Control transitions,
 Hardware acceptance checks after granting permissions:
 
 - Preview: check pointing, fist, palm, and three-finger pinch in your actual lighting. Make sure an unintended hand pose does not activate a command.
+- In preview, clap twice with both hands visible; check for **CLAP ONCE MORE**, then **DOUBLE CLAP · MISSION CONTROL**. One clap, keeping hands together, and ordinary palm/fist commands must not count as a double clap. Repeat in live mode to open Mission Control. Avoid hiding a hand behind the other at contact: missing detections do not count as claps.
 - Aim at a small Dock or toolbar item, hold steady for two seconds until **TARGET HELD** appears, then open your palm. Keep it open and move your hand: the cursor and click should stay on the item. Return to an index-only point for about 0.4 seconds to resume aiming. Repeat near the screen edge and across calibrated displays.
 - Calibrate both displays; point between them and verify the named target display. Overlapping regions must show ambiguity with no live movement.
 - Live: aim inside an ordinary window, pinch, move, and release. The window should stay still while forming/releasing the pinch. Try moving a window across the display boundary.
